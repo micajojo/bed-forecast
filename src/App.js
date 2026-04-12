@@ -558,7 +558,7 @@ export default function App() {
 
   const handleSort=(col)=>{if(sortCol===col)setSortDir(d=>d*-1);else{setSortCol(col);setSortDir(-1);}};
 
-  const TABS=[{id:"overview",label:"Overview"},{id:"forecast",label:"Forecast"},{id:"bedmap",label:"Bed Map"},{id:"patients",label:"Patient List"},{id:"data",label:"Data Input"},{id:"model",label:"Model Info"}];
+  const TABS=[{id:"overview",label:"Overview"},{id:"forecast",label:"Forecast"},{id:"bedmap",label:"Bed Map"},{id:"patients",label:"Patient List"},{id:"data",label:"Data Input"}];
 
   return(
     <div style={S.app}>
@@ -637,9 +637,16 @@ export default function App() {
               <table style={{...S.table,marginTop:8}}>
                 <thead><tr>{["Ward","Beds","Occ.","Occupancy","Avg LOS","3-Day Trend"].map(h=><th key={h} style={S.th}>{h}</th>)}</tr></thead>
                 <tbody>{WARD_NAMES.map(w=>{const d=wardData[w];const fc=forecast[w]||[];const wp=patients.filter(p=>p.ward===w);return(
-                  <tr key={w} style={{cursor:"pointer"}} onClick={()=>{setSelectedWard(w);setTab("forecast");}}>
-                    <td style={{...S.td,fontWeight:600}}>{w}</td>
-                    <td style={S.td}>{d.total}{d.extra>0?<span style={{color:C.warn,fontSize:10}}> +{d.extra}</span>:""}</td><td style={S.td}>{d.occupied}</td>
+                  <tr key={w}>
+                    <td style={{...S.td,fontWeight:600,cursor:"pointer"}} onClick={()=>{setSelectedWard(w);setTab("forecast");}}>{w}</td>
+                    <td style={S.td}>
+                      <div style={{display:"flex",alignItems:"center",gap:4}}>
+                        <button onClick={(e)=>{e.stopPropagation();adjustBeds(w,-1);}} style={{width:20,height:20,borderRadius:3,border:`1px solid ${C.border}`,background:C.surfaceAlt,color:C.textMuted,cursor:"pointer",fontSize:12,display:"flex",alignItems:"center",justifyContent:"center",padding:0}}>−</button>
+                        <span style={{minWidth:20,textAlign:"center"}}>{d.total}</span>
+                        <button onClick={(e)=>{e.stopPropagation();adjustBeds(w,1);}} style={{width:20,height:20,borderRadius:3,border:`1px solid ${C.border}`,background:C.surfaceAlt,color:C.textMuted,cursor:"pointer",fontSize:12,display:"flex",alignItems:"center",justifyContent:"center",padding:0}}>+</button>
+                        {d.extra>0&&<span style={{color:C.warn,fontSize:10}}>+{d.extra}</span>}
+                      </div>
+                    </td><td style={S.td}>{d.occupied}</td>
                     <td style={S.td}><div style={{display:"flex",alignItems:"center",gap:8}}><MiniBar value={d.occ} max={1} color={OccColor(d.occ)} height={6}/><span style={{fontSize:11,color:OccColor(d.occ),minWidth:36}}>{pct(d.occ)}</span></div></td>
                     <td style={S.td}>{fmt(wp.length?wp.reduce((s,p)=>s+p.los,0)/wp.length:0)}d</td>
                     <td style={S.td}><SparkForecast data={fc.slice(0,3)} height={28} width={80}/></td>
@@ -742,7 +749,6 @@ export default function App() {
           </div>
         )}
 
-        {tab==="model"&&<ModelInfo/>}
       </div>
     </div>
   );
