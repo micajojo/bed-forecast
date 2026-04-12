@@ -23,18 +23,23 @@ const fmt = (n) => (n == null ? "—" : typeof n === "number" ? n.toFixed(1) : n
 const pct = (n) => (n == null ? "—" : `${Math.round(n * 100)}%`);
 const dayLabel = (i) => { if (i===0) return "Today"; if (i===1) return "Tomorrow"; const d=new Date(); d.setDate(d.getDate()+i); return d.toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"}); };
 
-const BODY_REGIONS = ["lower_limb","upper_limb","chest","abdomen_pelvis","head_face","back","neck","buttock","lower_limb_fracture","upper_limb_fracture","multi_region","stump_revision"];
-const BODY_REGION_LABELS = {lower_limb:"Lower Limb",upper_limb:"Upper Limb",chest:"Chest",abdomen_pelvis:"Abdomen/Pelvis",head_face:"Head/Face",back:"Back",neck:"Neck",buttock:"Buttock",lower_limb_fracture:"Lower Limb + Fracture",upper_limb_fracture:"Upper Limb + Fracture",multi_region:"Multi-Region",stump_revision:"Stump Revision"};
-const DX_GROUPS = ["GSW","Blast Injury","Mine Injury","Stab Wound","Other Weapon Injury","Non-Weapon Injury"];
+const BODY_REGIONS = ["lower_limb","upper_limb","chest","abdomen_pelvis","head_face","back","neck","buttock","multi_region"];
+const BODY_REGION_LABELS = {lower_limb:"Lower Limb",upper_limb:"Upper Limb",chest:"Chest",abdomen_pelvis:"Abdomen/Pelvis",head_face:"Head/Face",back:"Back",neck:"Neck",buttock:"Buttock",multi_region:"Multi-Region",stump_revision:"Stump Revision",lower_limb_fracture:"Lower Limb (fracture)",upper_limb_fracture:"Upper Limb (fracture)"};
+const DX_GROUPS = ["GSW","GSW + Fracture","Blast Injury","Mine Injury","Stab Wound","Other Weapon Injury","Non-Weapon Injury","Stump Revision","Other"];
 
 function getAgeBand(age) {
   if (age < 5) return "0-4"; if (age < 15) return "5-14"; if (age < 50) return "15-49"; if (age < 65) return "50-64"; return "65+";
 }
 
-function parseBodyRegion(text) {
-  if (!text) return null;
+// Returns { bodyRegion, hasFracture, isStumpRevision }
+function parseDiagnosisText(text) {
+  if (!text) return { bodyRegion: null, hasFracture: false, isStumpRevision: false };
   const t = text.toLowerCase();
-  const hasFx = t.includes('#') || t.includes('fracture') || t.includes('fract');
+
+  // Stump revision → diagnosis group, not body region
+  if (/stump|revision|amputation|aka/.test(t)) return { bodyRegion: null, hasFracture: false, isStumpRevision: true };
+
+  const hasFracture = t.includes('#') || t.includes('fracture') || t.includes('fract');
   const regions = new Set();
   if (/head|face|eye|mandib|maxil|mouth|lip|occiput|temporal/.test(t)) regions.add('head_face');
   if (/neck|kneck/.test(t)) regions.add('neck');
@@ -44,21 +49,33 @@ function parseBodyRegion(text) {
   if (/arm|humerus|elbow|forearm|fore arm|hand|wrist|shoulder|finger|thumb|palm/.test(t)) regions.add('upper_limb');
   if (/leg|thigh|femur|knee|tibia|fibula|ankle|foot|feet|hip|limb/.test(t)) regions.add('lower_limb');
   if (/buttock|gluteal|scrotum/.test(t)) regions.add('buttock');
-  if (/stump|revision|amputation|aka/.test(t)) return 'stump_revision';
-  if (regions.size === 0) return /multiple|multiples/.test(t) ? 'multi_region' : null;
+
+  if (regions.size === 0) {
+    if (/multiple|multiples/.test(t)) return { bodyRegion: 'multi_region', hasFracture, isStumpRevision: false };
+    return { bodyRegion: null, hasFracture, isStumpRevision: false };
+  }
+
   const trunk = ['chest','abdomen_pelvis','back','neck'].filter(r => regions.has(r));
   const ext = ['upper_limb','lower_limb','buttock'].filter(r => regions.has(r));
   const head = regions.has('head_face');
-  if ((trunk.length && ext.length) || (trunk.length && head) || (head && ext.length) || regions.size >= 3) return 'multi_region';
-  if (regions.has('abdomen_pelvis')) return 'abdomen_pelvis';
-  if (regions.has('chest')) return 'chest';
-  if (regions.has('neck')) return 'neck';
-  if (regions.has('back')) return 'back';
-  if (regions.has('head_face')) return 'head_face';
-  if (regions.has('lower_limb')) return hasFx ? 'lower_limb_fracture' : 'lower_limb';
-  if (regions.has('upper_limb')) return hasFx ? 'upper_limb_fracture' : 'upper_limb';
-  if (regions.has('buttock')) return 'buttock';
-  return null;
+  let bodyRegion;
+  if ((trunk.length && ext.length) || (trunk.length && head) || (head && ext.length) || regions.size >= 3) bodyRegion = 'multi_region';
+  else if (regions.has('abdomen_pelvis')) bodyRegion = 'abdomen_pelvis';
+  else if (regions.has('chest')) bodyRegion = 'chest';
+  else if (regions.has('neck')) bodyRegion = 'neck';
+  else if (regions.has('back')) bodyRegion = 'back';
+  else if (regions.has('head_face')) bodyRegion = 'head_face';
+  else if (regions.has('lower_limb')) bodyRegion = 'lower_limb';
+  else if (regions.has('upper_limb')) bodyRegion = 'upper_limb';
+  else if (regions.has('buttock')) bodyRegion = 'buttock';
+  else bodyRegion = null;
+
+  return { bodyRegion, hasFracture, isStumpRevision: false };
+}
+
+// Backward-compatible wrapper
+function parseBodyRegion(text) {
+  return parseDiagnosisText(text).bodyRegion;
 }
 
 // ═══════════════════════════════════════════════════════
@@ -66,24 +83,48 @@ function parseBodyRegion(text) {
 // ═══════════════════════════════════════════════════════
 function predictRemainingLOS(patient) {
   const { diagnosisGroup, ageBand, isReadmission, bodyRegion, los } = patient;
-  const l1Key = `${diagnosisGroup}|${ageBand}|${isReadmission ? 'Y' : 'N'}`;
+  // Map new diagnosis groups to model keys
+  const isFracture = diagnosisGroup === 'GSW + Fracture';
+  const modelDxGroup = isFracture ? 'GSW' : (diagnosisGroup === 'Stump Revision' ? 'GSW' : diagnosisGroup);
+
+  const l1Key = `${modelDxGroup}|${ageBand}|${isReadmission ? 'Y' : 'N'}`;
   let ref = MODEL.level1[l1Key];
-  if (!ref) ref = MODEL.fallbacks[diagnosisGroup];
+  if (!ref) ref = MODEL.fallbacks[modelDxGroup];
   if (!ref) ref = MODEL.overall;
 
   let median = ref.median || MODEL.overall.median;
   let p75 = ref.p75 || MODEL.overall.p75;
   let p25 = ref.p25 || MODEL.overall.p25;
 
+  // Body region adjustment
   if (bodyRegion && MODEL.level2_body_region[bodyRegion]) {
     const br = MODEL.level2_body_region[bodyRegion];
-    const overallMedian = MODEL.fallbacks[diagnosisGroup]?.median || MODEL.overall.median;
+    const overallMedian = MODEL.fallbacks[modelDxGroup]?.median || MODEL.overall.median;
     if (overallMedian > 0) {
       const ratio = br.median / overallMedian;
       median = median * ratio;
       p75 = p75 * ratio;
       p25 = p25 * ratio;
     }
+  }
+
+  // Fracture modifier — use the fracture body region data if available
+  if (isFracture) {
+    const fxRef = bodyRegion === 'lower_limb' ? MODEL.level2_body_region['lower_limb_fracture']
+                : bodyRegion === 'upper_limb' ? MODEL.level2_body_region['upper_limb_fracture']
+                : null;
+    if (fxRef) {
+      median = fxRef.median; p75 = fxRef.p75; p25 = fxRef.p25;
+    } else {
+      // General fracture multiplier if no specific body region match
+      median *= 1.5; p75 *= 1.5; p25 *= 1.3;
+    }
+  }
+
+  // Stump revision — use stump_revision body region data
+  if (diagnosisGroup === 'Stump Revision' && MODEL.level2_body_region['stump_revision']) {
+    const sr = MODEL.level2_body_region['stump_revision'];
+    median = sr.median; p75 = sr.p75; p25 = sr.p25;
   }
 
   const remaining = Math.max(0, median - los);
@@ -115,8 +156,9 @@ function generateDemoPatients(n=90) {
   for (let i = 0; i < n; i++) {
     const age = rB(3, 72);
     const sex = Math.random() > 0.88 ? 'F' : 'M';
-    const dg = Math.random() < 0.95 ? 'GSW' : pick(['Blast Injury','Stab Wound','Non-Weapon Injury']);
-    const br = dg === 'GSW' ? pick(BODY_REGIONS) : null;
+    const dg0 = Math.random() < 0.80 ? 'GSW' : Math.random() < 0.5 ? 'GSW + Fracture' : pick(['Blast Injury','Stab Wound','Non-Weapon Injury','Stump Revision']);
+    const br = (dg0 !== 'Stump Revision') ? pick(BODY_REGIONS) : null;
+    const dg = dg0;
     const isReadmit = Math.random() < 0.02;
     const ageBand = getAgeBand(age);
     const ward = pick(WARD_NAMES);
@@ -205,7 +247,7 @@ function SinglePatientEntry({ onAdd }) {
   const today = new Date().toISOString().split('T')[0];
   const [form, setForm] = useState({
     id:'', age:'', sex:'M', ward:WARD_NAMES[0], bed:'', diagnosisGroup:'GSW',
-    bodyRegion:'', diagnosisText:'', isReadmission:false, admitDate:today,
+    bodyRegion:'', diagnosisText:'', isReadmission:false, hasFracture:false, admitDate:today,
     // Severity
     severityCategory:'', traumaScore:'', traumaScoreType:'',
     // Vitals
@@ -220,14 +262,23 @@ function SinglePatientEntry({ onAdd }) {
     const age = parseInt(form.age) || 30;
     const admitDate = form.admitDate || today;
     const los = Math.max(1, Math.round((new Date() - new Date(admitDate)) / 86400000) + 1);
-    const br = form.bodyRegion || parseBodyRegion(form.diagnosisText) || null;
-    const pred = predictRemainingLOS({ diagnosisGroup: form.diagnosisGroup, ageBand: getAgeBand(age), isReadmission: form.isReadmission, bodyRegion: br, los });
+    const parsed = parseDiagnosisText(form.diagnosisText);
+    const br = form.bodyRegion || parsed.bodyRegion || null;
+    const hasFx = form.hasFracture || parsed.hasFracture || false;
+    // For model lookup: combine body region + fracture into internal key
+    let modelBr = br;
+    if (hasFx && br === 'lower_limb') modelBr = 'lower_limb_fracture';
+    else if (hasFx && br === 'upper_limb') modelBr = 'upper_limb_fracture';
+    // Auto-adjust diagnosis group based on parsed text
+    let dg = form.diagnosisGroup;
+    if (parsed.isStumpRevision) dg = 'Stump Revision';
+    const pred = predictRemainingLOS({ diagnosisGroup: dg, ageBand: getAgeBand(age), isReadmission: form.isReadmission, bodyRegion: modelBr, los });
     const bedMax = WARD_CONFIG[form.ward] || 20;
     return {
       id: form.id || `P${Date.now().toString().slice(-4)}`,
       age, sex: form.sex, ward: form.ward,
       bed: form.bed || `${form.ward.replace(/\s/g,'').substring(0,3).toUpperCase()}-${rB(1,bedMax)}`,
-      diagnosisGroup: form.diagnosisGroup, bodyRegion: br, isReadmission: form.isReadmission,
+      diagnosisGroup: dg, bodyRegion: br, hasFracture: hasFx, isReadmission: form.isReadmission,
       admitDate, los, estRemaining: pred.remaining, estRemainingLow: pred.remainingLow,
       estRemainingHigh: pred.remainingHigh, dischProb3d: pred.dischProb3d, refGroup: pred.refGroup,
       // Severity & vitals stored but not yet used in model
@@ -256,7 +307,7 @@ function SinglePatientEntry({ onAdd }) {
     if (!form.id && !form.age) return;
     onAdd(buildPatient());
     setResult(null);
-    setForm(f => ({...f, id:'', age:'', bed:'', diagnosisText:'', bodyRegion:'', traumaScore:'', severityCategory:'', hr:'', bpSys:'', bpDia:'', rr:'', spo2:'', gcs:'', temp:'', vitalsOther:''}));
+    setForm(f => ({...f, id:'', age:'', bed:'', diagnosisText:'', bodyRegion:'', hasFracture:false, traumaScore:'', severityCategory:'', hr:'', bpSys:'', bpDia:'', rr:'', spo2:'', gcs:'', temp:'', vitalsOther:''}));
   };
 
   return (
@@ -278,10 +329,11 @@ function SinglePatientEntry({ onAdd }) {
         <div><label style={S.fieldLabel}>Admission Date</label><input style={S.input} type="date" value={form.admitDate} onChange={e=>handleChange('admitDate',e.target.value)}/></div>
       </div>
 
-      {/* Row 3: Diagnosis, Body Region, Readmission */}
-      <div style={S.fieldRow}>
+      {/* Row 3: Diagnosis, Body Region, Fracture, Readmission */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 0.6fr 0.6fr",gap:10,marginBottom:10}}>
         <div><label style={S.fieldLabel}>Diagnosis Group</label><select style={{...S.select,width:"100%"}} value={form.diagnosisGroup} onChange={e=>handleChange('diagnosisGroup',e.target.value)}>{DX_GROUPS.map(d=><option key={d} value={d}>{d}</option>)}</select></div>
         <div><label style={S.fieldLabel}>Body Region</label><select style={{...S.select,width:"100%"}} value={form.bodyRegion} onChange={e=>handleChange('bodyRegion',e.target.value)}><option value="">— Auto-detect or select —</option>{BODY_REGIONS.map(b=><option key={b} value={b}>{BODY_REGION_LABELS[b]}</option>)}</select></div>
+        <div><label style={S.fieldLabel}>Fracture?</label><select style={{...S.select,width:"100%"}} value={form.hasFracture?'Y':'N'} onChange={e=>handleChange('hasFracture',e.target.value==='Y')}><option value="N">No</option><option value="Y">Yes</option></select></div>
         <div><label style={S.fieldLabel}>Readmission?</label><select style={{...S.select,width:"100%"}} value={form.isReadmission?'Y':'N'} onChange={e=>handleChange('isReadmission',e.target.value==='Y')}><option value="N">No</option><option value="Y">Yes</option></select></div>
       </div>
 
@@ -289,7 +341,15 @@ function SinglePatientEntry({ onAdd }) {
       <div style={{marginBottom:14}}>
         <label style={S.fieldLabel}>Diagnosis Text (optional — auto-parses body region)</label>
         <input style={S.input} value={form.diagnosisText} onChange={e=>handleChange('diagnosisText',e.target.value)} placeholder="e.g. GSW to the left thigh with femur fracture"/>
-        {form.diagnosisText && !form.bodyRegion && (()=>{const parsed=parseBodyRegion(form.diagnosisText); return parsed ? <span style={{fontSize:11,color:C.success,marginTop:4,display:"block"}}>Detected: {BODY_REGION_LABELS[parsed]||parsed}</span> : <span style={{fontSize:11,color:C.warn,marginTop:4,display:"block"}}>Could not detect body region</span>;})()}
+        {form.diagnosisText && (()=>{
+          const parsed=parseDiagnosisText(form.diagnosisText);
+          const parts=[];
+          if(parsed.isStumpRevision) parts.push(<span key="sr" style={{color:C.accent}}>Stump Revision (→ diagnosis group)</span>);
+          if(parsed.bodyRegion && !form.bodyRegion) parts.push(<span key="br" style={{color:C.success}}>Region: {BODY_REGION_LABELS[parsed.bodyRegion]||parsed.bodyRegion}</span>);
+          if(parsed.hasFracture && !parsed.isStumpRevision) parts.push(<span key="fx" style={{color:C.warn}}>+ Fracture (→ diagnosis group)</span>);
+          if(!parsed.bodyRegion && !parsed.isStumpRevision) parts.push(<span key="none" style={{color:C.warn}}>Could not detect body region</span>);
+          return parts.length ? <div style={{fontSize:11,marginTop:4,display:"flex",gap:10}}>{parts}</div> : null;
+        })()}
       </div>
 
       {/* Row 4: Severity */}
@@ -388,9 +448,9 @@ function CsvImport({ onImport }) {
   const sampleCSV=`patient_id,age,sex,ward,bed,diagnosis_group,body_region,is_readmission,admit_date,los
 P0001,26,M,Ward I,WI-5,GSW,lower_limb,N,2026-03-15,28
 P0002,35,M,Ward K,WK-12,GSW,chest,N,2026-04-01,11
-P0003,42,M,HDU,HDU-3,GSW,lower_limb_fracture,N,2026-03-20,23
+P0003,42,M,HDU,HDU-3,GSW + Fracture,lower_limb,N,2026-03-20,23
 P0004,19,M,Ward B,WB-8,GSW,upper_limb,Y,2026-04-05,7
-P0005,55,M,Recovery 1,R1-6,GSW,back,N,2026-03-28,15`;
+P0005,55,M,Recovery 1,R1-6,Stump Revision,,N,2026-03-28,15`;
 
   const handleImport=()=>{
     const lines=(text||"").trim().split("\n").filter(Boolean);
@@ -398,8 +458,13 @@ P0005,55,M,Recovery 1,R1-6,GSW,back,N,2026-03-28,15`;
     const header=lines[0].split(",").map(h=>h.trim().toLowerCase());
     const rows=lines.slice(1).map(line=>{const vals=line.split(",");const obj={};header.forEach((h,i)=>obj[h]=vals[i]?.trim());return obj;}).filter(r=>r.patient_id&&r.admit_date);
     const patients=rows.map((r,i)=>{
-      const age=parseInt(r.age)||30;const los=parseInt(r.los)||1;const dg=r.diagnosis_group||'GSW';
-      const br=r.body_region||parseBodyRegion(r.diagnosis_text)||null;const isR=r.is_readmission==='Y';
+      const age=parseInt(r.age)||30;const los=parseInt(r.los)||1;
+      const parsed=parseDiagnosisText(r.diagnosis_text||'');
+      const br=r.body_region||parsed.bodyRegion||null;
+      let dg=r.diagnosis_group||'GSW';
+      if(parsed.isStumpRevision) dg='Stump Revision';
+      else if(parsed.hasFracture && dg==='GSW') dg='GSW + Fracture';
+      const isR=r.is_readmission==='Y';
       const pred=predictRemainingLOS({diagnosisGroup:dg,ageBand:getAgeBand(age),isReadmission:isR,bodyRegion:br,los});
       return{id:r.patient_id,age,sex:r.sex||'M',ward:r.ward||'Ward I',bed:r.bed||`W-${i+1}`,diagnosisGroup:dg,bodyRegion:br,isReadmission:isR,admitDate:r.admit_date,los,estRemaining:pred.remaining,estRemainingLow:pred.remainingLow,estRemainingHigh:pred.remainingHigh,dischProb3d:pred.dischProb3d,refGroup:pred.refGroup};
     });
@@ -713,8 +778,8 @@ export default function App() {
               <div style={S.cardLabel}>{selectedWard==="All"?"All Patients":selectedWard} · {filteredPatients.length} patients</div>
               <div style={{display:"flex",gap:8}}>
                 <button style={{...S.btn(false),fontSize:11,padding:"5px 12px"}} onClick={()=>{
-                  const headers=["patient_id","age","sex","ward","bed","diagnosis_group","body_region","is_readmission","admit_date","los","est_remaining","est_remaining_low","est_remaining_high"];
-                  const rows=filteredPatients.map(p=>[p.id,p.age,p.sex,p.ward,p.bed,p.diagnosisGroup,p.bodyRegion||'',p.isReadmission?'Y':'N',p.admitDate,p.los,p.estRemaining,p.estRemainingLow,p.estRemainingHigh].join(','));
+                  const headers=["patient_id","age","sex","ward","bed","diagnosis_group","body_region","has_fracture","is_readmission","admit_date","los","est_remaining","est_remaining_low","est_remaining_high"];
+                  const rows=filteredPatients.map(p=>[p.id,p.age,p.sex,p.ward,p.bed,p.diagnosisGroup,p.bodyRegion||'',p.hasFracture?'Y':'N',p.isReadmission?'Y':'N',p.admitDate,p.los,p.estRemaining,p.estRemainingLow,p.estRemainingHigh].join(','));
                   const csv=headers.join(',')+'\n'+rows.join('\n');
                   const blob=new Blob([csv],{type:'text/csv'});
                   const url=URL.createObjectURL(blob);
