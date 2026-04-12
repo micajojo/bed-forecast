@@ -636,17 +636,13 @@ export default function App() {
               <div style={S.cardLabel}>Ward Summary</div>
               <table style={{...S.table,marginTop:8}}>
                 <thead><tr>{["Ward","Beds","Occ.","Occupancy","Avg LOS","3-Day Trend"].map(h=><th key={h} style={S.th}>{h}</th>)}</tr></thead>
-                <tbody>{WARD_NAMES.map(w=>{const d=wardData[w];const fc=forecast[w]||[];const wp=patients.filter(p=>p.ward===w);return(
-                  <tr key={w}>
-                    <td style={{...S.td,fontWeight:600,cursor:"pointer"}} onClick={()=>{setSelectedWard(w);setTab("forecast");}}>{w}</td>
-                    <td style={S.td}>
-                      <div style={{display:"flex",alignItems:"center",gap:4}}>
-                        <button onClick={(e)=>{e.stopPropagation();adjustBeds(w,-1);}} style={{width:20,height:20,borderRadius:3,border:`1px solid ${C.border}`,background:C.surfaceAlt,color:C.textMuted,cursor:"pointer",fontSize:12,display:"flex",alignItems:"center",justifyContent:"center",padding:0}}>−</button>
-                        <span style={{minWidth:20,textAlign:"center"}}>{d.total}</span>
-                        <button onClick={(e)=>{e.stopPropagation();adjustBeds(w,1);}} style={{width:20,height:20,borderRadius:3,border:`1px solid ${C.border}`,background:C.surfaceAlt,color:C.textMuted,cursor:"pointer",fontSize:12,display:"flex",alignItems:"center",justifyContent:"center",padding:0}}>+</button>
-                        {d.extra>0&&<span style={{color:C.warn,fontSize:10}}>+{d.extra}</span>}
-                      </div>
-                    </td><td style={S.td}>{d.occupied}</td>
+                <tbody>{WARD_NAMES.map(w=>{const d=wardData[w];const fc=forecast[w]||[];const wp=patients.filter(p=>p.ward===w);
+                  const overCapacity = d.extra > 0 && (d.extra / d.baseline) > 0.1;
+                  const rowColor = overCapacity ? C.danger : undefined;
+                  return(
+                  <tr key={w} style={{cursor:"pointer"}} onClick={()=>{setSelectedWard(w);setTab("forecast");}}>
+                    <td style={{...S.td,fontWeight:600,color:overCapacity?C.danger:C.text}}>{w}{overCapacity&&<span style={{fontSize:10,marginLeft:6}}>⚠</span>}</td>
+                    <td style={{...S.td,color:overCapacity?C.danger:C.text}}>{d.total}{d.extra>0&&<span style={{color:overCapacity?C.danger:C.warn,fontSize:10}}> +{d.extra}</span>}</td><td style={S.td}>{d.occupied}</td>
                     <td style={S.td}><div style={{display:"flex",alignItems:"center",gap:8}}><MiniBar value={d.occ} max={1} color={OccColor(d.occ)} height={6}/><span style={{fontSize:11,color:OccColor(d.occ),minWidth:36}}>{pct(d.occ)}</span></div></td>
                     <td style={S.td}>{fmt(wp.length?wp.reduce((s,p)=>s+p.los,0)/wp.length:0)}d</td>
                     <td style={S.td}><SparkForecast data={fc.slice(0,3)} height={28} width={80}/></td>
@@ -713,7 +709,19 @@ export default function App() {
         {/* PATIENT LIST */}
         {tab==="patients"&&(
           <div style={S.card}>
-            <div style={{...S.cardLabel,marginBottom:10}}>{selectedWard==="All"?"All Patients":selectedWard} · {filteredPatients.length} patients</div>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+              <div style={S.cardLabel}>{selectedWard==="All"?"All Patients":selectedWard} · {filteredPatients.length} patients</div>
+              <div style={{display:"flex",gap:8}}>
+                <button style={{...S.btn(false),fontSize:11,padding:"5px 12px"}} onClick={()=>{
+                  const headers=["patient_id","age","sex","ward","bed","diagnosis_group","body_region","is_readmission","admit_date","los","est_remaining","est_remaining_low","est_remaining_high"];
+                  const rows=filteredPatients.map(p=>[p.id,p.age,p.sex,p.ward,p.bed,p.diagnosisGroup,p.bodyRegion||'',p.isReadmission?'Y':'N',p.admitDate,p.los,p.estRemaining,p.estRemainingLow,p.estRemainingHigh].join(','));
+                  const csv=headers.join(',')+'\n'+rows.join('\n');
+                  const blob=new Blob([csv],{type:'text/csv'});
+                  const url=URL.createObjectURL(blob);
+                  const a=document.createElement('a');a.href=url;a.download=`patient_list_${new Date().toISOString().split('T')[0]}.csv`;a.click();URL.revokeObjectURL(url);
+                }}>Export CSV</button>
+              </div>
+            </div>
             <div style={{maxHeight:520,overflowY:"auto"}}>
               <table style={S.table}>
                 <thead><tr>
