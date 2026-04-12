@@ -1,6 +1,6 @@
 # Field Hospital — Bed Demand Forecast Tool
 
-A web-based bed demand forecasting dashboard trained on 2,310 historical admission records (2019–2025) from a war surgery field hospital.
+A web-based bed demand forecasting dashboard.
 
 ## Features
 
