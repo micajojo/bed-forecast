@@ -274,10 +274,12 @@ function SinglePatientEntry({ onAdd }) {
     if (parsed.isStumpRevision) dg = 'Stump Revision';
     const pred = predictRemainingLOS({ diagnosisGroup: dg, ageBand: getAgeBand(age), isReadmission: form.isReadmission, bodyRegion: modelBr, los });
     const bedMax = WARD_CONFIG[form.ward] || 20;
+    const bedNum = parseInt(form.bed) || rB(1, bedMax);
+    const wardPrefix = form.ward.replace(/\s/g,'').substring(0,3).toUpperCase();
     return {
       id: form.id || `P${Date.now().toString().slice(-4)}`,
       age, sex: form.sex, ward: form.ward,
-      bed: form.bed || `${form.ward.replace(/\s/g,'').substring(0,3).toUpperCase()}-${rB(1,bedMax)}`,
+      bed: `${wardPrefix}-${bedNum}`,
       diagnosisGroup: dg, bodyRegion: br, hasFracture: hasFx, isReadmission: form.isReadmission,
       admitDate, los, estRemaining: pred.remaining, estRemainingLow: pred.remainingLow,
       estRemainingHigh: pred.remainingHigh, dischProb3d: pred.dischProb3d, refGroup: pred.refGroup,
@@ -325,7 +327,7 @@ function SinglePatientEntry({ onAdd }) {
       {/* Row 2: Ward, Bed, Admission Date */}
       <div style={S.fieldRow}>
         <div><label style={S.fieldLabel}>Ward</label><select style={{...S.select,width:"100%"}} value={form.ward} onChange={e=>handleChange('ward',e.target.value)}>{WARD_NAMES.map(w=><option key={w} value={w}>{w} ({WARD_CONFIG[w]} beds)</option>)}</select></div>
-        <div><label style={S.fieldLabel}>Bed</label><input style={S.input} value={form.bed} onChange={e=>handleChange('bed',e.target.value)} placeholder="e.g. WI-12"/></div>
+        <div><label style={S.fieldLabel}>Bed Number</label><input style={S.input} type="number" min="1" value={form.bed} onChange={e=>handleChange('bed',e.target.value)} placeholder="e.g. 12"/></div>
         <div><label style={S.fieldLabel}>Admission Date</label><input style={S.input} type="date" value={form.admitDate} onChange={e=>handleChange('admitDate',e.target.value)}/></div>
       </div>
 
@@ -390,7 +392,7 @@ function SinglePatientEntry({ onAdd }) {
         {showVitals && (
           <div style={{marginTop:12}}>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:10,marginBottom:10}}>
-              <div><label style={S.fieldLabel}>HR (bpm)</label><input style={S.input} type="number" value={form.hr} onChange={e=>handleChange('hr',e.target.value)} placeholder="e.g. 88"/></div>
+              <div><label style={S.fieldLabel}>PR (bpm)</label><input style={S.input} type="number" value={form.hr} onChange={e=>handleChange('hr',e.target.value)} placeholder="e.g. 88"/></div>
               <div>
                 <label style={S.fieldLabel}>BP (mmHg)</label>
                 <div style={{display:"flex",gap:4,alignItems:"center"}}>
@@ -414,7 +416,7 @@ function SinglePatientEntry({ onAdd }) {
       {/* Actions */}
       <div style={{display:"flex",gap:10,alignItems:"center"}}>
         <button style={S.btn(true)} onClick={handlePredict}>Predict LOS</button>
-        <button style={S.btn(false)} onClick={handleAddToList}>Add to Patient List</button>
+        {result && <button style={S.btn(false)} onClick={handleAddToList}>Add to Patient List</button>}
       </div>
 
       {/* Result */}
@@ -778,8 +780,8 @@ export default function App() {
               <div style={S.cardLabel}>{selectedWard==="All"?"All Patients":selectedWard} · {filteredPatients.length} patients</div>
               <div style={{display:"flex",gap:8}}>
                 <button style={{...S.btn(false),fontSize:11,padding:"5px 12px"}} onClick={()=>{
-                  const headers=["patient_id","age","sex","ward","bed","diagnosis_group","body_region","has_fracture","is_readmission","admit_date","los","est_remaining","est_remaining_low","est_remaining_high"];
-                  const rows=filteredPatients.map(p=>[p.id,p.age,p.sex,p.ward,p.bed,p.diagnosisGroup,p.bodyRegion||'',p.hasFracture?'Y':'N',p.isReadmission?'Y':'N',p.admitDate,p.los,p.estRemaining,p.estRemainingLow,p.estRemainingHigh].join(','));
+                  const headers=["patient_id","age","sex","ward","bed","diagnosis_group","body_region","has_fracture","is_readmission","admit_date","los","predicted_los","est_remaining","est_remaining_low","est_remaining_high"];
+                  const rows=filteredPatients.map(p=>[p.id,p.age,p.sex,p.ward,p.bed,p.diagnosisGroup,p.bodyRegion||'',p.hasFracture?'Y':'N',p.isReadmission?'Y':'N',p.admitDate,p.los,p.los+p.estRemaining,p.estRemaining,p.estRemainingLow,p.estRemainingHigh].join(','));
                   const csv=headers.join(',')+'\n'+rows.join('\n');
                   const blob=new Blob([csv],{type:'text/csv'});
                   const url=URL.createObjectURL(blob);
@@ -790,7 +792,7 @@ export default function App() {
             <div style={{maxHeight:520,overflowY:"auto"}}>
               <table style={S.table}>
                 <thead><tr>
-                  {[{key:"id",label:"ID"},{key:"age",label:"Age"},{key:"sex",label:"Sex"},{key:"ward",label:"Ward"},{key:"diagnosisGroup",label:"Diagnosis"},{key:"bodyRegion",label:"Body Region"},{key:"isReadmission",label:"Readmit"},{key:"admitDate",label:"Admitted"},{key:"los",label:"LOS"},{key:"estRemaining",label:"Est. Left"},{key:"_remove",label:""}].map(col=>
+                  {[{key:"id",label:"ID"},{key:"age",label:"Age"},{key:"sex",label:"Sex"},{key:"ward",label:"Ward"},{key:"bed",label:"Bed"},{key:"diagnosisGroup",label:"Diagnosis"},{key:"bodyRegion",label:"Body Region"},{key:"admitDate",label:"Admitted"},{key:"los",label:"LOS"},{key:"predictedLOS",label:"Predicted LOS"},{key:"estRemaining",label:"Est. Left"},{key:"_remove",label:""}].map(col=>
                     <th key={col.key} style={{...S.th,cursor:col.key!=="_remove"?"pointer":"default",userSelect:"none"}} onClick={()=>col.key!=="_remove"&&handleSort(col.key)}>{col.label} {sortCol===col.key?(sortDir>0?"↑":"↓"):""}</th>
                   )}
                 </tr></thead>
@@ -799,11 +801,12 @@ export default function App() {
                     <tr key={p.id+p.admitDate}>
                       <td style={{...S.td,fontFamily:"'IBM Plex Mono',monospace",fontSize:11}}>{p.id}</td>
                       <td style={S.td}>{p.age}</td><td style={S.td}>{p.sex}</td><td style={S.td}>{p.ward}</td>
+                      <td style={{...S.td,fontFamily:"'IBM Plex Mono',monospace",fontSize:11}}>{p.bed}</td>
                       <td style={S.td}><span style={S.badge(C.purple)}>{p.diagnosisGroup}</span></td>
                       <td style={S.td}>{p.bodyRegion?<span style={S.badge(BR_COLORS[p.bodyRegion]||C.textMuted)}>{BODY_REGION_LABELS[p.bodyRegion]||p.bodyRegion}</span>:"—"}</td>
-                      <td style={S.td}>{p.isReadmission?<span style={S.badge(C.warn)}>Yes</span>:"—"}</td>
                       <td style={{...S.td,fontSize:11}}>{p.admitDate}</td>
                       <td style={S.td}>{p.los}d</td>
+                      <td style={{...S.td,fontWeight:600,color:C.accent}}>{p.los + p.estRemaining}d</td>
                       <td style={S.td}><span style={S.badge(p.estRemaining<=3?C.success:p.estRemaining>30?C.warn:C.textMuted)}>{p.estRemaining}d ({p.estRemainingLow}–{p.estRemainingHigh})</span></td>
                       <td style={S.td}><button onClick={()=>handleRemovePatient(p.id)} style={{background:"none",border:"none",color:C.danger,cursor:"pointer",fontSize:13,padding:2}} title="Remove patient">✕</button></td>
                     </tr>
