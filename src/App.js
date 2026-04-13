@@ -183,6 +183,12 @@ function generateDemoPatients(n=90) {
 // ═══════════════════════════════════════════════════════
 function forecastWard(patients, totalBeds, days=7) {
   const daily = [];
+  if (patients.length === 0) {
+    for (let d = 1; d <= days; d++) {
+      daily.push({ day: d, label: dayLabel(d), predicted: 0, total: totalBeds, occupancy: 0, ciLow: 0, ciHigh: 0 });
+    }
+    return daily;
+  }
   let occ = patients.length;
   for (let d = 1; d <= days; d++) {
     let expectedDischarges = 0;
@@ -190,7 +196,7 @@ function forecastWard(patients, totalBeds, days=7) {
       if (p.estRemaining <= d) expectedDischarges += 0.7 + Math.random()*0.3;
       else if (p.estRemaining <= d + 3) expectedDischarges += 0.2;
     });
-    const admitRate = totalBeds * 0.04 + (Math.random()-0.5)*1.5;
+    const admitRate = occ * 0.04 + (Math.random()-0.5)*1.2;
     occ = Math.max(0, Math.min(totalBeds, occ - expectedDischarges/days + admitRate));
     daily.push({ day: d, label: dayLabel(d), predicted: Math.round(occ), total: totalBeds, occupancy: occ/totalBeds, ciLow: Math.max(0, Math.round(occ - d*1.4)), ciHigh: Math.min(totalBeds, Math.round(occ + d*1.4)) });
   }
