@@ -772,7 +772,7 @@ export default function App() {
             })}
             <div style={{...S.card,background:C.warn+"10",borderColor:C.warn+"40"}}>
               <div style={{fontSize:12,color:C.warn,fontWeight:600,marginBottom:4}}>⚠ Interpretation</div>
-              <p style={{fontSize:12,color:C.textMuted,lineHeight:1.6,margin:0}}>Trained model ({MODEL.overall.count} records). Conditional LOS by diagnosis, age, readmission, body region. <strong style={{color:C.text}}>Days 1–3: operational. Days 4–7: directional.</strong></p>
+              <p style={{fontSize:12,color:C.textMuted,lineHeight:1.6,margin:0}}>Conditional LOS estimation by diagnosis, age, readmission, and body region. <strong style={{color:C.text}}>Days 1–3: operational. Days 4–7: directional only.</strong></p>
             </div>
           </div>
         )}
